@@ -1,0 +1,1114 @@
+-- Premium Universal Roblox Admin Spectator Script
+-- Place this in StarterPlayer > StarterPlayerScripts or StarterGui
+
+local Players = game:GetService("Players")
+local RunService = game:GetService("RunService")
+local UserInputService = game:GetService("UserInputService")
+local TweenService = game:GetService("TweenService")
+local Lighting = game:GetService("Lighting")
+
+local player = Players.LocalPlayer
+local camera = workspace.CurrentCamera
+local spectating = false
+local targetPlayer = nil
+local originalCFrame = nil
+local connection = nil
+local freecamEnabled = false
+local freecamSpeed = 1
+local showPlayerStats = true
+local nightVisionEnabled = false
+local xrayEnabled = false
+local originalLighting = {}
+
+-- Freecam state (declared early so functions can use them)
+local moveVector = Vector3.new(0, 0, 0)
+local keysPressed = {}
+local yaw = 0
+local pitch = 0
+local freecamPos = nil
+local mouseLookSensitivity = 0.002
+
+-- minimize state
+local isMinimized = false
+local savedMainSize = nil
+
+-- guard against multiple instances
+do
+ local existingGuiParent = player:FindFirstChild("PlayerGui")
+ local existing = existingGuiParent and existingGuiParent:FindFirstChild("SpectatorGUI")
+ if existing then
+  existing:Destroy()
+ end
+end
+
+-- Create GUI
+local screenGui = Instance.new("ScreenGui")
+screenGui.Name = "SpectatorGUI"
+screenGui.ResetOnSpawn = false
+screenGui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
+screenGui.Parent = player:WaitForChild("PlayerGui")
+screenGui.Enabled = true
+screenGui.IgnoreGuiInset = true
+
+-- Main Frame
+local mainFrame = Instance.new("Frame")
+mainFrame.Name = "MainFrame"
+mainFrame.Size = UDim2.new(0, 420, 0, 560)
+mainFrame.Position = UDim2.new(0.5, -210, 0.5, -280)
+mainFrame.BackgroundColor3 = Color3.fromRGB(18, 20, 28)
+mainFrame.BorderSizePixel = 0
+mainFrame.Active = true
+mainFrame.Draggable = true
+mainFrame.Parent = screenGui
+mainFrame.Visible = true
+
+local corner = Instance.new("UICorner")
+corner.CornerRadius = UDim.new(0, 12)
+corner.Parent = mainFrame
+
+local mainStroke = Instance.new("UIStroke")
+mainStroke.Color = Color3.fromRGB(70, 80, 110)
+mainStroke.Transparency = 0.3
+mainStroke.Thickness = 1
+mainStroke.ApplyStrokeMode = Enum.ApplyStrokeMode.Border
+mainStroke.Parent = mainFrame
+
+local shadow = Instance.new("Frame")
+shadow.Name = "Shadow"
+shadow.Size = UDim2.new(1, 10, 1, 10)
+shadow.Position = UDim2.new(0, -5, 0, -5)
+shadow.BackgroundColor3 = Color3.fromRGB(0, 0, 0)
+shadow.BackgroundTransparency = 0.35
+shadow.BorderSizePixel = 0
+shadow.ZIndex = 0
+shadow.Parent = mainFrame
+
+local shadowCorner = Instance.new("UICorner")
+shadowCorner.CornerRadius = UDim.new(0, 12)
+shadowCorner.Parent = shadow
+
+-- Gradient overlay
+local gradient = Instance.new("UIGradient")
+gradient.Color = ColorSequence.new{
+	ColorSequenceKeypoint.new(0, Color3.fromRGB(40, 40, 55)),
+	ColorSequenceKeypoint.new(1, Color3.fromRGB(25, 25, 35))
+}
+gradient.Rotation = 45
+gradient.Parent = mainFrame
+
+-- Title Bar
+local titleBar = Instance.new("Frame")
+titleBar.Name = "TitleBar"
+titleBar.Size = UDim2.new(1, 0, 0, 50)
+titleBar.BackgroundColor3 = Color3.fromRGB(40, 42, 60)
+titleBar.BorderSizePixel = 0
+titleBar.Parent = mainFrame
+
+local titleCorner = Instance.new("UICorner")
+titleCorner.CornerRadius = UDim.new(0, 12)
+titleCorner.Parent = titleBar
+
+local titleFix = Instance.new("Frame")
+titleFix.Size = UDim2.new(1, 0, 0, 12)
+titleFix.Position = UDim2.new(0, 0, 1, -12)
+titleFix.BackgroundColor3 = Color3.fromRGB(60, 60, 80)
+titleFix.BorderSizePixel = 0
+titleFix.Parent = titleBar
+
+local titleGradient = Instance.new("UIGradient")
+titleGradient.Color = ColorSequence.new{
+    ColorSequenceKeypoint.new(0, Color3.fromRGB(90, 94, 130)),
+    ColorSequenceKeypoint.new(1, Color3.fromRGB(58, 60, 88))
+}
+titleGradient.Rotation = 90
+titleGradient.Parent = titleBar
+
+local titleStroke = Instance.new("UIStroke")
+titleStroke.Color = Color3.fromRGB(90, 100, 140)
+titleStroke.Transparency = 0.4
+titleStroke.Thickness = 1
+titleStroke.ApplyStrokeMode = Enum.ApplyStrokeMode.Border
+titleStroke.Parent = titleBar
+
+local title = Instance.new("TextLabel")
+title.Size = UDim2.new(1, -120, 1, 0)
+title.Position = UDim2.new(0, 15, 0, 0)
+title.BackgroundTransparency = 1
+title.Text = "👁 ADMIN SPECTATOR PRO"
+title.TextColor3 = Color3.fromRGB(255, 255, 255)
+title.TextSize = 18
+title.Font = Enum.Font.GothamBold
+title.TextXAlignment = Enum.TextXAlignment.Left
+title.Parent = titleBar
+
+-- Minimize Button
+local minimizeButton = Instance.new("TextButton")
+minimizeButton.Name = "MinimizeButton"
+minimizeButton.Size = UDim2.new(0, 35, 0, 35)
+minimizeButton.Position = UDim2.new(1, -85, 0, 7.5)
+minimizeButton.BackgroundColor3 = Color3.fromRGB(100, 150, 200)
+minimizeButton.Text = "−"
+minimizeButton.TextColor3 = Color3.fromRGB(255, 255, 255)
+minimizeButton.TextSize = 20
+minimizeButton.Font = Enum.Font.GothamBold
+minimizeButton.BorderSizePixel = 0
+minimizeButton.Parent = titleBar
+
+local minCorner = Instance.new("UICorner")
+minCorner.CornerRadius = UDim.new(0, 8)
+minCorner.Parent = minimizeButton
+
+local minStroke = Instance.new("UIStroke")
+minStroke.Color = Color3.fromRGB(90, 100, 140)
+minStroke.Transparency = 0.4
+minStroke.Thickness = 1
+minStroke.ApplyStrokeMode = Enum.ApplyStrokeMode.Border
+minStroke.Parent = minimizeButton
+
+-- Close Button
+local closeButton = Instance.new("TextButton")
+closeButton.Name = "CloseButton"
+closeButton.Size = UDim2.new(0, 35, 0, 35)
+closeButton.Position = UDim2.new(1, -42.5, 0, 7.5)
+closeButton.BackgroundColor3 = Color3.fromRGB(220, 50, 50)
+closeButton.Text = "✕"
+closeButton.TextColor3 = Color3.fromRGB(255, 255, 255)
+closeButton.TextSize = 18
+closeButton.Font = Enum.Font.GothamBold
+closeButton.BorderSizePixel = 0
+closeButton.Parent = titleBar
+
+local closeCorner = Instance.new("UICorner")
+closeCorner.CornerRadius = UDim.new(0, 8)
+closeCorner.Parent = closeButton
+
+local closeStroke = Instance.new("UIStroke")
+closeStroke.Color = Color3.fromRGB(120, 70, 80)
+closeStroke.Transparency = 0.2
+closeStroke.Thickness = 1
+closeStroke.ApplyStrokeMode = Enum.ApplyStrokeMode.Border
+closeStroke.Parent = closeButton
+
+-- Status Label
+local statusLabel = Instance.new("TextLabel")
+statusLabel.Name = "StatusLabel"
+statusLabel.Size = UDim2.new(1, -30, 0, 25)
+statusLabel.Position = UDim2.new(0, 15, 0, 60)
+statusLabel.BackgroundTransparency = 1
+statusLabel.Text = "● Ready"
+statusLabel.TextColor3 = Color3.fromRGB(120, 220, 140)
+statusLabel.TextSize = 14
+statusLabel.Font = Enum.Font.GothamBold
+statusLabel.TextXAlignment = Enum.TextXAlignment.Left
+statusLabel.Parent = mainFrame
+
+-- Player Info Panel
+local infoPanel = Instance.new("Frame")
+infoPanel.Name = "InfoPanel"
+infoPanel.Size = UDim2.new(1, -30, 0, 70)
+infoPanel.Position = UDim2.new(0, 15, 0, 90)
+infoPanel.BackgroundColor3 = Color3.fromRGB(34, 36, 48)
+infoPanel.BorderSizePixel = 0
+infoPanel.Visible = false
+infoPanel.Parent = mainFrame
+
+local infoCorner = Instance.new("UICorner")
+infoCorner.CornerRadius = UDim.new(0, 8)
+infoCorner.Parent = infoPanel
+
+local infoStroke = Instance.new("UIStroke")
+infoStroke.Color = Color3.fromRGB(70, 80, 110)
+infoStroke.Transparency = 0.5
+infoStroke.Thickness = 1
+infoStroke.ApplyStrokeMode = Enum.ApplyStrokeMode.Border
+infoStroke.Parent = infoPanel
+
+local infoLabel = Instance.new("TextLabel")
+infoLabel.Size = UDim2.new(1, -20, 1, -20)
+infoLabel.Position = UDim2.new(0, 10, 0, 10)
+infoLabel.BackgroundTransparency = 1
+infoLabel.Text = "Player: N/A\nHealth: 0/100\nPosition: 0, 0, 0\nSpeed: 16"
+infoLabel.TextColor3 = Color3.fromRGB(200, 200, 220)
+infoLabel.TextSize = 12
+infoLabel.Font = Enum.Font.Gotham
+infoLabel.TextXAlignment = Enum.TextXAlignment.Left
+infoLabel.TextYAlignment = Enum.TextYAlignment.Top
+infoLabel.Parent = infoPanel
+
+-- Search Box
+local searchBox = Instance.new("TextBox")
+searchBox.Name = "SearchBox"
+searchBox.Size = UDim2.new(1, -30, 0, 38)
+searchBox.Position = UDim2.new(0, 15, 0, 170)
+searchBox.BackgroundColor3 = Color3.fromRGB(28, 30, 42)
+searchBox.PlaceholderText = "🔍 Search players..."
+searchBox.PlaceholderColor3 = Color3.fromRGB(150, 150, 170)
+searchBox.Text = ""
+searchBox.TextColor3 = Color3.fromRGB(255, 255, 255)
+searchBox.TextSize = 14
+searchBox.Font = Enum.Font.Gotham
+searchBox.ClearTextOnFocus = false
+searchBox.BorderSizePixel = 0
+searchBox.Parent = mainFrame
+
+local searchCorner = Instance.new("UICorner")
+searchCorner.CornerRadius = UDim.new(0, 8)
+searchCorner.Parent = searchBox
+
+local searchStroke = Instance.new("UIStroke")
+searchStroke.Color = Color3.fromRGB(70, 80, 110)
+searchStroke.Transparency = 0.6
+searchStroke.Thickness = 1
+searchStroke.ApplyStrokeMode = Enum.ApplyStrokeMode.Border
+searchStroke.Parent = searchBox
+
+-- Player List Frame
+local listFrame = Instance.new("ScrollingFrame")
+listFrame.Name = "ListFrame"
+listFrame.Size = UDim2.new(1, -30, 0, 180)
+listFrame.Position = UDim2.new(0, 15, 0, 218)
+listFrame.BackgroundColor3 = Color3.fromRGB(24, 26, 36)
+listFrame.BorderSizePixel = 0
+listFrame.ScrollBarThickness = 6
+listFrame.ScrollBarImageColor3 = Color3.fromRGB(100, 100, 140)
+listFrame.CanvasSize = UDim2.new(0, 0, 0, 0)
+listFrame.Parent = mainFrame
+
+local listCorner = Instance.new("UICorner")
+listCorner.CornerRadius = UDim.new(0, 8)
+listCorner.Parent = listFrame
+
+local listStroke = Instance.new("UIStroke")
+listStroke.Color = Color3.fromRGB(60, 70, 100)
+listStroke.Transparency = 0.6
+listStroke.Thickness = 1
+listStroke.ApplyStrokeMode = Enum.ApplyStrokeMode.Border
+listStroke.Parent = listFrame
+
+local listLayout = Instance.new("UIListLayout")
+listLayout.SortOrder = Enum.SortOrder.Name
+listLayout.Padding = UDim.new(0, 5)
+listLayout.Parent = listFrame
+
+local listPadding = Instance.new("UIPadding")
+listPadding.PaddingTop = UDim.new(0, 8)
+listPadding.PaddingBottom = UDim.new(0, 8)
+listPadding.PaddingLeft = UDim.new(0, 8)
+listPadding.PaddingRight = UDim.new(0, 8)
+listPadding.Parent = listFrame
+
+-- Controls Panel
+local controlsPanel = Instance.new("Frame")
+controlsPanel.Name = "ControlsPanel"
+controlsPanel.Size = UDim2.new(1, -30, 0, 100)
+controlsPanel.Position = UDim2.new(0, 15, 0, 408)
+controlsPanel.BackgroundColor3 = Color3.fromRGB(30, 32, 44)
+controlsPanel.BorderSizePixel = 0
+controlsPanel.Parent = mainFrame
+
+local controlsCorner = Instance.new("UICorner")
+controlsCorner.CornerRadius = UDim.new(0, 8)
+controlsCorner.Parent = controlsPanel
+
+local controlsStroke = Instance.new("UIStroke")
+controlsStroke.Color = Color3.fromRGB(70, 80, 110)
+controlsStroke.Transparency = 0.5
+controlsStroke.Thickness = 1
+controlsStroke.ApplyStrokeMode = Enum.ApplyStrokeMode.Border
+controlsStroke.Parent = controlsPanel
+
+-- Control Buttons Layout
+local controlsLayout = Instance.new("UIGridLayout")
+controlsLayout.CellSize = UDim2.new(0.48, 0, 0, 40)
+controlsLayout.CellPadding = UDim2.new(0.02, 0, 0, 8)
+controlsLayout.SortOrder = Enum.SortOrder.LayoutOrder
+controlsLayout.Parent = controlsPanel
+
+local controlsPadding = Instance.new("UIPadding")
+controlsPadding.PaddingTop = UDim.new(0, 8)
+controlsPadding.PaddingBottom = UDim.new(0, 8)
+controlsPadding.PaddingLeft = UDim.new(0, 8)
+controlsPadding.PaddingRight = UDim.new(0, 8)
+controlsPadding.Parent = controlsPanel
+
+-- Function to create control button
+local function createControlButton(name, text, color, order)
+	local button = Instance.new("TextButton")
+	button.Name = name
+	button.BackgroundColor3 = color
+	button.Text = text
+	button.TextColor3 = Color3.fromRGB(255, 255, 255)
+	button.TextSize = 12
+	button.Font = Enum.Font.GothamBold
+	button.BorderSizePixel = 0
+	button.AutoButtonColor = false
+	button.LayoutOrder = order
+	button.Parent = controlsPanel
+	
+	local btnCorner = Instance.new("UICorner")
+	btnCorner.CornerRadius = UDim.new(0, 6)
+	btnCorner.Parent = button
+
+	local btnStroke = Instance.new("UIStroke")
+	btnStroke.Color = Color3.fromRGB(90, 100, 140)
+	btnStroke.Transparency = 0.4
+	btnStroke.Thickness = 1
+	btnStroke.ApplyStrokeMode = Enum.ApplyStrokeMode.Border
+	btnStroke.Parent = button
+	
+	return button
+end
+
+local freecamButton = createControlButton("FreecamButton", "🎥 Freecam: OFF", Color3.fromRGB(70, 70, 90), 1)
+local statsButton = createControlButton("StatsButton", "📊 Stats: ON", Color3.fromRGB(70, 90, 70), 2)
+local nightVisionButton = createControlButton("NightVisionButton", "🌙 Night Vision: OFF", Color3.fromRGB(70, 70, 90), 3)
+local xrayButton = createControlButton("XRayButton", "👻 X-Ray: OFF", Color3.fromRGB(70, 70, 90), 4)
+
+-- Notification System
+local notifFrame = Instance.new("Frame")
+notifFrame.Name = "NotifFrame"
+notifFrame.Size = UDim2.new(0, 300, 0, 60)
+notifFrame.Position = UDim2.new(0.5, -150, 0, -70)
+notifFrame.BackgroundColor3 = Color3.fromRGB(40, 40, 55)
+notifFrame.BorderSizePixel = 0
+notifFrame.Parent = screenGui
+
+local notifCorner = Instance.new("UICorner")
+notifCorner.CornerRadius = UDim.new(0, 10)
+notifCorner.Parent = notifFrame
+
+local notifStroke = Instance.new("UIStroke")
+notifStroke.Color = Color3.fromRGB(70, 80, 110)
+notifStroke.Transparency = 0.6
+notifStroke.Thickness = 1
+notifStroke.ApplyStrokeMode = Enum.ApplyStrokeMode.Border
+notifStroke.Parent = notifFrame
+
+local notifText = Instance.new("TextLabel")
+notifText.Size = UDim2.new(1, -20, 1, -20)
+notifText.Position = UDim2.new(0, 10, 0, 10)
+notifText.BackgroundTransparency = 1
+notifText.Text = ""
+notifText.TextColor3 = Color3.fromRGB(255, 255, 255)
+notifText.TextSize = 14
+notifText.Font = Enum.Font.GothamBold
+notifText.TextWrapped = true
+notifText.Parent = notifFrame
+
+-- Functions
+local function showNotification(text, duration)
+	notifText.Text = text
+	notifFrame:TweenPosition(UDim2.new(0.5, -150, 0, 20), "Out", "Quad", 0.3, true)
+	
+	task.delay(duration or 2, function()
+		notifFrame:TweenPosition(UDim2.new(0.5, -150, 0, -70), "In", "Quad", 0.3, true)
+	end)
+end
+
+local function updateStatus(text, color)
+	statusLabel.Text = "● " .. text
+	statusLabel.TextColor3 = color or Color3.fromRGB(255, 255, 255)
+end
+
+local function updatePlayerInfo()
+	if not targetPlayer or not targetPlayer.Character then
+		infoPanel.Visible = false
+		return
+	end
+	
+	local char = targetPlayer.Character
+	local humanoid = char:FindFirstChildOfClass("Humanoid")
+	local rootPart = char:FindFirstChild("HumanoidRootPart")
+	
+	if humanoid and rootPart then
+		local pos = rootPart.Position
+		local health = math.floor(humanoid.Health)
+		local maxHealth = math.floor(humanoid.MaxHealth)
+		local speed = humanoid.WalkSpeed
+		
+		infoLabel.Text = string.format(
+			"Player: %s\nHealth: %d/%d (%.1f%%)\nPosition: %.0f, %.0f, %.0f\nSpeed: %.0f",
+			targetPlayer.Name,
+			health, maxHealth, (health/maxHealth)*100,
+			pos.X, pos.Y, pos.Z,
+			speed
+		)
+		infoPanel.Visible = showPlayerStats
+	end
+end
+
+local function toggleNightVision()
+	nightVisionEnabled = not nightVisionEnabled
+	
+	if nightVisionEnabled then
+		-- Store original lighting
+		originalLighting.Brightness = Lighting.Brightness
+		originalLighting.Ambient = Lighting.Ambient
+		originalLighting.OutdoorAmbient = Lighting.OutdoorAmbient
+		
+		-- Apply night vision
+		Lighting.Brightness = 3
+		Lighting.Ambient = Color3.fromRGB(100, 255, 100)
+		Lighting.OutdoorAmbient = Color3.fromRGB(100, 255, 100)
+		
+		nightVisionButton.Text = "🌙 Night Vision: ON"
+		nightVisionButton.BackgroundColor3 = Color3.fromRGB(70, 120, 70)
+		showNotification("🌙 Night Vision Enabled")
+	else
+		-- Restore original lighting
+		Lighting.Brightness = originalLighting.Brightness or 1
+		Lighting.Ambient = originalLighting.Ambient or Color3.fromRGB(0, 0, 0)
+		Lighting.OutdoorAmbient = originalLighting.OutdoorAmbient or Color3.fromRGB(127, 127, 127)
+		
+		nightVisionButton.Text = "🌙 Night Vision: OFF"
+		nightVisionButton.BackgroundColor3 = Color3.fromRGB(70, 70, 90)
+		showNotification("🌙 Night Vision Disabled")
+	end
+end
+
+local function toggleXRay()
+	xrayEnabled = not xrayEnabled
+	
+	if xrayEnabled then
+		for _, obj in pairs(workspace:GetDescendants()) do
+			if obj:IsA("BasePart") and not obj.Parent:FindFirstChildOfClass("Humanoid") then
+				obj.LocalTransparencyModifier = 0.7
+			end
+		end
+		xrayButton.Text = "👻 X-Ray: ON"
+		xrayButton.BackgroundColor3 = Color3.fromRGB(120, 70, 120)
+		showNotification("👻 X-Ray Enabled")
+	else
+		for _, obj in pairs(workspace:GetDescendants()) do
+			if obj:IsA("BasePart") then
+				obj.LocalTransparencyModifier = 0
+			end
+		end
+		xrayButton.Text = "👻 X-Ray: OFF"
+		xrayButton.BackgroundColor3 = Color3.fromRGB(70, 70, 90)
+		showNotification("👻 X-Ray Disabled")
+	end
+end
+
+local function stopSpectating()
+	if connection then
+		connection:Disconnect()
+		connection = nil
+	end
+	-- ensure freecam is turned off and mouse unlocked
+	if freecamEnabled then
+		disableFreecam()
+	end
+	
+	if originalCFrame then
+		camera.CameraType = Enum.CameraType.Custom
+		camera.CameraSubject = player.Character and player.Character:FindFirstChildOfClass("Humanoid")
+		originalCFrame = nil
+	end
+	
+	spectating = false
+	targetPlayer = nil
+	infoPanel.Visible = false
+	updateStatus("Ready", Color3.fromRGB(100, 255, 100))
+end
+
+local function enableFreecam()
+	if not targetPlayer or not targetPlayer.Character then return end
+	
+	freecamEnabled = true
+	local char = targetPlayer.Character
+	local rootPart = char:FindFirstChild("HumanoidRootPart")
+	
+	if rootPart then
+		camera.CameraType = Enum.CameraType.Scriptable
+		camera.CFrame = rootPart.CFrame * CFrame.new(0, 5, 10)
+		freecamPos = camera.CFrame.Position
+		local lv = camera.CFrame.LookVector
+		yaw = math.atan2(-lv.X, -lv.Z)
+		pitch = math.asin(math.clamp(lv.Y, -1, 1))
+		UserInputService.MouseBehavior = Enum.MouseBehavior.LockCenter
+		UserInputService.MouseIconEnabled = false
+		
+		freecamButton.Text = "🎥 Freecam: ON"
+		freecamButton.BackgroundColor3 = Color3.fromRGB(70, 120, 70)
+		showNotification("🎥 Freecam Enabled | WASD + Mouse")
+	end
+end
+
+local function disableFreecam()
+	freecamEnabled = false
+	
+	if targetPlayer and targetPlayer.Character then
+		camera.CameraType = Enum.CameraType.Custom
+		camera.CameraSubject = targetPlayer.Character:FindFirstChildOfClass("Humanoid")
+	end
+	
+	UserInputService.MouseBehavior = Enum.MouseBehavior.Default
+	UserInputService.MouseIconEnabled = true
+	freecamButton.Text = "🎥 Freecam: OFF"
+	freecamButton.BackgroundColor3 = Color3.fromRGB(70, 70, 90)
+	showNotification("🎥 Freecam Disabled")
+end
+
+local function spectatePlayer(target)
+	if target == player then
+		showNotification("⚠️ Cannot spectate yourself!", 2)
+		return
+	end
+	
+	if not target.Character or not target.Character:FindFirstChild("HumanoidRootPart") then
+		showNotification("⚠️ Player has no character!", 2)
+		return
+	end
+	
+	stopSpectating()
+	
+	targetPlayer = target
+	spectating = true
+	originalCFrame = camera.CFrame
+	
+	camera.CameraType = Enum.CameraType.Custom
+	camera.CameraSubject = target.Character:FindFirstChildOfClass("Humanoid")
+	
+	updateStatus("Spectating " .. target.Name, Color3.fromRGB(100, 150, 255))
+	showNotification("👁 Now spectating " .. target.Name)
+	
+	-- Keep camera on target
+	connection = RunService.RenderStepped:Connect(function()
+		if targetPlayer and targetPlayer.Character then
+			if not freecamEnabled then
+				local humanoid = targetPlayer.Character:FindFirstChildOfClass("Humanoid")
+				if humanoid then
+					camera.CameraSubject = humanoid
+				else
+					stopSpectating()
+				end
+			end
+			updatePlayerInfo()
+		else
+			stopSpectating()
+		end
+	end)
+end
+
+local function createPlayerButton(targetPlayer)
+	local button = Instance.new("TextButton")
+	button.Name = targetPlayer.Name
+	button.Size = UDim2.new(1, -8, 0, 38)
+	button.BackgroundColor3 = Color3.fromRGB(45, 47, 64)
+	button.BorderSizePixel = 0
+	button.AutoButtonColor = false
+	
+	local btnCorner = Instance.new("UICorner")
+	btnCorner.CornerRadius = UDim.new(0, 6)
+	btnCorner.Parent = button
+
+	local btnStroke = Instance.new("UIStroke")
+	btnStroke.Color = Color3.fromRGB(80, 90, 130)
+	btnStroke.Transparency = 0.5
+	btnStroke.Thickness = 1
+	btnStroke.ApplyStrokeMode = Enum.ApplyStrokeMode.Border
+	btnStroke.Parent = button
+	
+	local nameLabel = Instance.new("TextLabel")
+	nameLabel.Size = UDim2.new(1, -50, 1, 0)
+	nameLabel.Position = UDim2.new(0, 10, 0, 0)
+	nameLabel.BackgroundTransparency = 1
+	nameLabel.Text = "👤 " .. targetPlayer.Name
+	nameLabel.TextColor3 = Color3.fromRGB(255, 255, 255)
+	nameLabel.TextSize = 13
+	nameLabel.Font = Enum.Font.GothamBold
+	nameLabel.TextXAlignment = Enum.TextXAlignment.Left
+	nameLabel.Parent = button
+	
+	local healthLabel = Instance.new("TextLabel")
+	healthLabel.Size = UDim2.new(0, 40, 1, 0)
+	healthLabel.Position = UDim2.new(1, -45, 0, 0)
+	healthLabel.BackgroundTransparency = 1
+	healthLabel.Text = "100"
+	healthLabel.TextColor3 = Color3.fromRGB(100, 255, 100)
+	healthLabel.TextSize = 12
+	healthLabel.Font = Enum.Font.Gotham
+	healthLabel.Parent = button
+	
+	-- Update health display
+	local function updateHealth()
+		if targetPlayer.Character then
+			local humanoid = targetPlayer.Character:FindFirstChildOfClass("Humanoid")
+			if humanoid then
+				local health = math.floor(humanoid.Health)
+				healthLabel.Text = tostring(health)
+				
+				if health > 70 then
+					healthLabel.TextColor3 = Color3.fromRGB(100, 255, 100)
+				elseif health > 30 then
+					healthLabel.TextColor3 = Color3.fromRGB(255, 200, 100)
+				else
+					healthLabel.TextColor3 = Color3.fromRGB(255, 100, 100)
+				end
+			end
+		end
+	end
+	
+	spawn(function()
+		while button.Parent do
+			updateHealth()
+			task.wait(0.5)
+		end
+	end)
+	
+	button.MouseButton1Click:Connect(function()
+		spectatePlayer(targetPlayer)
+	end)
+	
+	button.MouseEnter:Connect(function()
+		TweenService:Create(button, TweenInfo.new(0.15), {BackgroundColor3 = Color3.fromRGB(60, 62, 84)}):Play()
+	end)
+	
+	button.MouseLeave:Connect(function()
+		TweenService:Create(button, TweenInfo.new(0.15), {BackgroundColor3 = Color3.fromRGB(45, 47, 64)}):Play()
+	end)
+	
+	button.Parent = listFrame
+	return button
+end
+
+local function updatePlayerList(filter)
+	for _, child in pairs(listFrame:GetChildren()) do
+		if child:IsA("TextButton") then
+			child:Destroy()
+		end
+	end
+	
+	local count = 0
+	for _, p in pairs(Players:GetPlayers()) do
+		if p ~= player then
+			if not filter or filter == "" or string.lower(p.Name):find(string.lower(filter), 1, true) then
+				createPlayerButton(p)
+				count = count + 1
+			end
+		end
+	end
+	
+	listFrame.CanvasSize = UDim2.new(0, 0, 0, count * 43 + 16)
+end
+
+-- Freecam Controls
+
+RunService.RenderStepped:Connect(function(dt)
+	if freecamEnabled then
+		local delta = UserInputService:GetMouseDelta()
+		yaw = yaw - delta.X * mouseLookSensitivity
+		pitch = math.clamp(pitch - delta.Y * mouseLookSensitivity, -math.rad(89), math.rad(89))
+
+		local move = Vector3.new(
+			(keysPressed[Enum.KeyCode.D] and 1 or 0) - (keysPressed[Enum.KeyCode.A] and 1 or 0),
+			(keysPressed[Enum.KeyCode.E] and 1 or 0) - (keysPressed[Enum.KeyCode.Q] and 1 or 0),
+			(keysPressed[Enum.KeyCode.S] and 1 or 0) - (keysPressed[Enum.KeyCode.W] and 1 or 0)
+		)
+		local speed = 50 * freecamSpeed * dt * ((keysPressed[Enum.KeyCode.LeftShift] and 3) or 1)
+
+		local camRot = CFrame.Angles(0, yaw, 0) * CFrame.Angles(pitch, 0, 0)
+		local forward = camRot.LookVector
+		local right = camRot.RightVector
+		local up = camRot.UpVector
+
+		if not freecamPos then freecamPos = camera.CFrame.Position end
+		freecamPos = freecamPos + (right * move.X + up * move.Y - forward * move.Z) * speed
+		camera.CFrame = CFrame.new(freecamPos) * camRot
+	end
+end)
+
+-- Event Connections
+closeButton.MouseButton1Click:Connect(function()
+	stopSpectating()
+	if nightVisionEnabled then toggleNightVision() end
+	if xrayEnabled then toggleXRay() end
+	screenGui.Enabled = false
+end)
+
+local isMinimized = false
+local savedMainSize
+
+minimizeButton.MouseButton1Click:Connect(function()
+    if not isMinimized then
+        savedMainSize = mainFrame.Size
+        for _, child in ipairs(mainFrame:GetChildren()) do
+            if child ~= titleBar then
+                child.Visible = false
+            end
+        end
+        minimizeButton.Text = "□"
+        mainFrame:TweenSize(UDim2.new(savedMainSize.X.Scale, savedMainSize.X.Offset, 0, 50), "Out", "Quad", 0.2, true)
+        isMinimized = true
+        showNotification("📋 Panel Minimized")
+    else
+        mainFrame:TweenSize(savedMainSize or UDim2.new(0, 420, 0, 560), "Out", "Quad", 0.2, true)
+        for _, child in ipairs(mainFrame:GetChildren()) do
+            if child ~= titleBar then
+                child.Visible = true
+            end
+        end
+        -- enforce logic-based visibility after restore
+        infoPanel.Visible = spectating and showPlayerStats
+        minimizeButton.Text = "−"
+        isMinimized = false
+        showNotification("📋 Panel Restored")
+    end
+end)
+
+freecamButton.MouseButton1Click:Connect(function()
+	if not spectating then
+		showNotification("⚠️ Select a player first!")
+		return
+	end
+	
+	if freecamEnabled then
+		disableFreecam()
+	else
+		enableFreecam()
+	end
+end)
+
+statsButton.MouseButton1Click:Connect(function()
+	showPlayerStats = not showPlayerStats
+	
+	if showPlayerStats then
+		statsButton.Text = "📊 Stats: ON"
+		statsButton.BackgroundColor3 = Color3.fromRGB(70, 90, 70)
+		infoPanel.Visible = spectating and showPlayerStats
+		updatePlayerInfo()
+		showNotification("📊 Stats Enabled")
+	else
+		statsButton.Text = "📊 Stats: OFF"
+		statsButton.BackgroundColor3 = Color3.fromRGB(70, 70, 90)
+		infoPanel.Visible = false
+		showNotification("📊 Stats Disabled")
+	end
+end)
+
+nightVisionButton.MouseButton1Click:Connect(toggleNightVision)
+xrayButton.MouseButton1Click:Connect(toggleXRay)
+
+-- Button hover effects
+for _, btn in pairs({closeButton, minimizeButton, freecamButton, statsButton, nightVisionButton, xrayButton}) do
+	btn.MouseEnter:Connect(function()
+		local currentColor = btn.BackgroundColor3
+		local brighterColor = Color3.new(
+			math.min(currentColor.R + 0.1, 1),
+			math.min(currentColor.G + 0.1, 1),
+			math.min(currentColor.B + 0.1, 1)
+		)
+		TweenService:Create(btn, TweenInfo.new(0.2), {BackgroundColor3 = brighterColor}):Play()
+	end)
+	
+	btn.MouseLeave:Connect(function()
+		if btn == closeButton then
+			TweenService:Create(btn, TweenInfo.new(0.2), {BackgroundColor3 = Color3.fromRGB(220, 50, 50)}):Play()
+		elseif btn == minimizeButton then
+			TweenService:Create(btn, TweenInfo.new(0.2), {BackgroundColor3 = Color3.fromRGB(100, 150, 200)}):Play()
+		elseif btn == freecamButton and freecamEnabled then
+			TweenService:Create(btn, TweenInfo.new(0.2), {BackgroundColor3 = Color3.fromRGB(70, 120, 70)}):Play()
+		elseif btn == statsButton and showPlayerStats then
+			TweenService:Create(btn, TweenInfo.new(0.2), {BackgroundColor3 = Color3.fromRGB(70, 90, 70)}):Play()
+		elseif btn == nightVisionButton and nightVisionEnabled then
+			TweenService:Create(btn, TweenInfo.new(0.2), {BackgroundColor3 = Color3.fromRGB(70, 120, 70)}):Play()
+		elseif btn == xrayButton and xrayEnabled then
+			TweenService:Create(btn, TweenInfo.new(0.2), {BackgroundColor3 = Color3.fromRGB(120, 70, 120)}):Play()
+		else
+			TweenService:Create(btn, TweenInfo.new(0.2), {BackgroundColor3 = Color3.fromRGB(70, 70, 90)}):Play()
+		end
+	end)
+end
+
+searchBox:GetPropertyChangedSignal("Text"):Connect(function()
+	updatePlayerList(searchBox.Text)
+end)
+
+Players.PlayerAdded:Connect(function(p)
+	updatePlayerList(searchBox.Text)
+	showNotification("✅ " .. p.Name .. " joined", 2)
+end)
+
+Players.PlayerRemoving:Connect(function(p)
+	if targetPlayer == p then
+		stopSpectating()
+		showNotification("⚠️ Target player left", 2)
+	end
+	updatePlayerList(searchBox.Text)
+	showNotification("❌ " .. p.Name .. " left", 2)
+end)
+
+-- Keybinds
+UserInputService.InputBegan:Connect(function(input, processed)
+	if not processed then
+		if input.KeyCode == Enum.KeyCode.E then
+			if freecamEnabled then
+				keysPressed[Enum.KeyCode.E] = true
+				return
+			end
+			if spectating then
+				stopSpectating()
+				if freecamEnabled then disableFreecam() end
+				showNotification("⏹ Stopped spectating")
+			else
+				screenGui.Enabled = not screenGui.Enabled
+				if screenGui.Enabled then
+					showNotification("👁 Spectator Menu Opened")
+				end
+			end
+		elseif input.KeyCode == Enum.KeyCode.F and spectating then
+			if freecamEnabled then
+				disableFreecam()
+			else
+				enableFreecam()
+			end
+		elseif input.KeyCode == Enum.KeyCode.N then
+			toggleNightVision()
+		elseif input.KeyCode == Enum.KeyCode.X then
+			toggleXRay()
+		elseif input.KeyCode == Enum.KeyCode.T and spectating then
+			showPlayerStats = not showPlayerStats
+			infoPanel.Visible = showPlayerStats
+		end
+	end
+	
+	-- Freecam movement
+	if freecamEnabled then
+		keysPressed[input.KeyCode] = true
+	end
+end)
+
+UserInputService.InputEnded:Connect(function(input)
+	keysPressed[input.KeyCode] = nil
+end)
+
+-- Mouse wheel speed control for freecam
+UserInputService.InputChanged:Connect(function(input)
+	if input.UserInputType == Enum.UserInputType.MouseWheel and freecamEnabled then
+		freecamSpeed = math.clamp(freecamSpeed + input.Position.Z * 0.2, 0.5, 5)
+		showNotification("🎥 Speed: " .. string.format("%.1f", freecamSpeed) .. "x", 1)
+	end
+end)
+
+-- Teleport to player (Ctrl + Click)
+local function enableTeleport()
+	listFrame.ChildAdded:Connect(function(child)
+		if child:IsA("TextButton") then
+			child.MouseButton2Click:Connect(function()
+				local targetPlayer = Players:FindFirstChild(child.Name)
+				if targetPlayer and targetPlayer.Character then
+					local rootPart = targetPlayer.Character:FindFirstChild("HumanoidRootPart")
+					local myRootPart = player.Character and player.Character:FindFirstChild("HumanoidRootPart")
+					
+					if rootPart and myRootPart then
+						myRootPart.CFrame = rootPart.CFrame * CFrame.new(0, 0, 3)
+						showNotification("⚡ Teleported to " .. targetPlayer.Name)
+					end
+				end
+			end)
+		end
+	end)
+end
+
+enableTeleport()
+
+-- Spectate next/previous with arrow keys
+local function getPlayerList()
+	local playerList = {}
+	for _, p in pairs(Players:GetPlayers()) do
+		if p ~= player then
+			table.insert(playerList, p)
+		end
+	end
+	table.sort(playerList, function(a, b) return a.Name < b.Name end)
+	return playerList
+end
+
+UserInputService.InputBegan:Connect(function(input, processed)
+	if not processed and spectating then
+		local playerList = getPlayerList()
+		local currentIndex = table.find(playerList, targetPlayer)
+		
+		if input.KeyCode == Enum.KeyCode.Right or input.KeyCode == Enum.KeyCode.Period then
+			-- Next player
+			if currentIndex then
+				local nextIndex = currentIndex + 1
+				if nextIndex > #playerList then nextIndex = 1 end
+				spectatePlayer(playerList[nextIndex])
+			end
+		elseif input.KeyCode == Enum.KeyCode.Left or input.KeyCode == Enum.KeyCode.Comma then
+			-- Previous player
+			if currentIndex then
+				local prevIndex = currentIndex - 1
+				if prevIndex < 1 then prevIndex = #playerList end
+				spectatePlayer(playerList[prevIndex])
+			end
+		end
+	end
+end)
+
+-- Keybind Help Panel
+local helpPanel = Instance.new("Frame")
+helpPanel.Name = "HelpPanel"
+helpPanel.Size = UDim2.new(0, 280, 0, 240)
+helpPanel.Position = UDim2.new(1, -300, 1, -260)
+helpPanel.BackgroundColor3 = Color3.fromRGB(35, 35, 50)
+helpPanel.BorderSizePixel = 0
+helpPanel.Visible = false
+helpPanel.Parent = screenGui
+
+local helpCorner = Instance.new("UICorner")
+helpCorner.CornerRadius = UDim.new(0, 10)
+helpCorner.Parent = helpPanel
+
+local helpStroke = Instance.new("UIStroke")
+helpStroke.Color = Color3.fromRGB(70, 80, 110)
+helpStroke.Transparency = 0.6
+helpStroke.Thickness = 1
+helpStroke.ApplyStrokeMode = Enum.ApplyStrokeMode.Border
+helpStroke.Parent = helpPanel
+
+local helpTitle = Instance.new("TextLabel")
+helpTitle.Size = UDim2.new(1, 0, 0, 35)
+helpTitle.BackgroundColor3 = Color3.fromRGB(50, 50, 70)
+helpTitle.Text = "⌨️ KEYBINDS"
+helpTitle.TextColor3 = Color3.fromRGB(255, 255, 255)
+helpTitle.TextSize = 14
+helpTitle.Font = Enum.Font.GothamBold
+helpTitle.BorderSizePixel = 0
+helpTitle.Parent = helpPanel
+
+local helpTitleCorner = Instance.new("UICorner")
+helpTitleCorner.CornerRadius = UDim.new(0, 10)
+helpTitleCorner.Parent = helpTitle
+
+local helpFix = Instance.new("Frame")
+helpFix.Size = UDim2.new(1, 0, 0, 10)
+helpFix.Position = UDim2.new(0, 0, 1, -10)
+helpFix.BackgroundColor3 = Color3.fromRGB(50, 50, 70)
+helpFix.BorderSizePixel = 0
+helpFix.Parent = helpTitle
+
+local helpText = Instance.new("TextLabel")
+helpText.Size = UDim2.new(1, -20, 1, -45)
+helpText.Position = UDim2.new(0, 10, 0, 40)
+helpText.BackgroundTransparency = 1
+helpText.Text = [[E - Toggle Menu / Stop Spectating
+F - Toggle Freecam
+N - Toggle Night Vision
+X - Toggle X-Ray
+T - Toggle Stats Panel
+←/→ or ,/. - Cycle Players
+Right Click - Teleport to Player
+Mouse Wheel - Freecam Speed
+Shift - Faster Freecam
+Q/E - Up/Down in Freecam
+H - Toggle This Help]]
+helpText.TextColor3 = Color3.fromRGB(200, 200, 220)
+helpText.TextSize = 11
+helpText.Font = Enum.Font.Gotham
+helpText.TextXAlignment = Enum.TextXAlignment.Left
+helpText.TextYAlignment = Enum.TextYAlignment.Top
+helpText.Parent = helpPanel
+
+-- Toggle help with H key
+UserInputService.InputBegan:Connect(function(input, processed)
+	if not processed and input.KeyCode == Enum.KeyCode.H then
+		helpPanel.Visible = not helpPanel.Visible
+		if helpPanel.Visible then
+			showNotification("📖 Showing keybinds")
+		else
+			showNotification("📖 Hiding keybinds")
+		end
+	end
+end)
+
+-- Player count indicator
+local playerCountLabel = Instance.new("TextLabel")
+playerCountLabel.Size = UDim2.new(0, 150, 0, 25)
+playerCountLabel.Position = UDim2.new(1, -165, 0, 60)
+playerCountLabel.BackgroundTransparency = 1
+playerCountLabel.Text = "Players: 0"
+playerCountLabel.TextColor3 = Color3.fromRGB(150, 150, 170)
+playerCountLabel.TextSize = 12
+playerCountLabel.Font = Enum.Font.Gotham
+playerCountLabel.TextXAlignment = Enum.TextXAlignment.Right
+playerCountLabel.Parent = mainFrame
+
+local function updatePlayerCount()
+	local count = #Players:GetPlayers() - 1
+	playerCountLabel.Text = "Players: " .. count
+end
+
+Players.PlayerAdded:Connect(updatePlayerCount)
+Players.PlayerRemoving:Connect(updatePlayerCount)
+
+-- Spectator trail effect
+local trailPart = nil
+local trailConnection = nil
+
+local function createTrail()
+	if not targetPlayer or not targetPlayer.Character then return end
+	
+	local rootPart = targetPlayer.Character:FindFirstChild("HumanoidRootPart")
+	if not rootPart then return end
+	
+	trailPart = Instance.new("Part")
+	trailPart.Size = Vector3.new(2, 0.1, 2)
+	trailPart.Anchored = true
+	trailPart.CanCollide = false
+	trailPart.Transparency = 0.7
+	trailPart.Color = Color3.fromRGB(100, 150, 255)
+	trailPart.Material = Enum.Material.Neon
+	trailPart.Parent = workspace
+	
+	trailConnection = RunService.Heartbeat:Connect(function()
+		if targetPlayer and targetPlayer.Character then
+			local rp = targetPlayer.Character:FindFirstChild("HumanoidRootPart")
+			if rp then
+				trailPart.CFrame = rp.CFrame * CFrame.new(0, -3, 0)
+			end
+		else
+			if trailPart then trailPart:Destroy() end
+			if trailConnection then trailConnection:Disconnect() end
+		end
+	end)
+end
+
+-- Cleanup on spectate end
+local originalStopSpectating = stopSpectating
+stopSpectating = function()
+	originalStopSpectating()
+	if trailPart then
+		trailPart:Destroy()
+		trailPart = nil
+	end
+	if trailConnection then
+		trailConnection:Disconnect()
+		trailConnection = nil
+	end
+end
+
+-- Initialize
+updatePlayerList()
+updatePlayerCount()
+updateStatus("Ready", Color3.fromRGB(100, 255, 100))
+showNotification("👁 Admin Spectator Pro Loaded!\nPress H for keybinds", 4)
+
+print("==================================")
+print("ADMIN SPECTATOR PRO LOADED")
+print("==================================")
+print("Press E - Toggle Menu")
+print("Press H - Show Keybinds")
+print("==================================")
+
+-- Auto-update player list every 3 seconds
+spawn(function()
+	while true do
+		task.wait(3)
+		if screenGui.Enabled then
+			updatePlayerList(searchBox.Text)
+		end
+	end
+end)
